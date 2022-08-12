@@ -48,8 +48,7 @@ type Database struct {
 
 // Metrics config.
 type Metrics struct {
-	// ClientType metrics client type e.g. prometheus, datadog.
-	ClientType string `json:"client_type,omitempty"`
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 type Config struct {

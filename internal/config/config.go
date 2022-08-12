@@ -25,7 +25,7 @@ admin:
 database:
   query_timeout: 5s
 metrics:
-  client_type: noop
+  enabled: true
 disable_anonymous_reports: false
 `)
 	defaultConfig Config
