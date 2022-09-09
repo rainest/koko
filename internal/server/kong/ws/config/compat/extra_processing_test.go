@@ -494,3 +494,222 @@ func TestExtraProcessing_EnsureExtraProcessing(t *testing.T) {
 		})
 	}
 }
+
+func TestExtraProcessing_CorrectStatsdIdentifiers(t *testing.T) {
+	tests := []struct {
+		name                string
+		uncompressedPayload string
+		expectedPayload     string
+	}{
+		{
+			name: "ensure null '*_identifier' fields are properly filled with defaults for one metric",
+			uncompressedPayload: `{
+				"config_table": {
+					"plugins": [
+						{
+							"name": "statsd",
+							"config": {
+								"metrics": [
+									{
+										"consumer_identifier": null,
+										"name": "request_count",
+										"sample_rate": 1,
+										"service_identifier": null,
+										"stat_type": "counter",
+										"workspace_identifier": null
+									}
+								]
+							}
+						}
+					]
+				}
+			}`,
+			expectedPayload: `{
+				"config_table": {
+					"plugins": [
+						{
+							"name": "statsd",
+							"config": {
+								"metrics": [
+									{
+										"consumer_identifier": null,
+										"name": "request_count",
+										"sample_rate": 1,
+										"service_identifier": "service_name_or_host",
+										"stat_type": "counter",
+										"workspace_identifier": null
+									}
+								]
+							}
+						}
+					]
+				}
+			}`,
+		},
+		{
+			name: "ensure null '*_identifier' fields are properly filled with defaults for multiple metrics",
+			uncompressedPayload: `{
+				"config_table": {
+					"plugins": [
+						{
+							"name": "statsd",
+							"config": {
+								"metrics": [
+									{
+										"consumer_identifier": null,
+										"name": "request_count",
+										"sample_rate": 1,
+										"service_identifier": null,
+										"stat_type": "counter",
+										"workspace_identifier": null
+									},
+									{
+										"workspace_identifier": null,
+										"name": "request_per_user",
+										"stat_type": "counter",
+										"sample_rate": 1,
+										"service_identifier": null,
+										"consumer_identifier": null
+									},
+									{
+										"consumer_identifier": null,
+										"name": "request_size",
+										"sample_rate": null,
+										"service_identifier": null,
+										"stat_type": "timer",
+										"workspace_identifier": null
+									}
+								]
+							}
+						}
+					]
+				}
+			}`,
+			expectedPayload: `{
+				"config_table": {
+					"plugins": [
+						{
+							"name": "statsd",
+							"config": {
+								"metrics": [
+									{
+										"workspace_identifier": null,
+										"name": "request_count",
+										"stat_type": "counter",
+										"sample_rate": 1,
+										"service_identifier": "service_name_or_host",
+										"consumer_identifier": null
+									},
+									{
+										"workspace_identifier": null,
+										"name": "request_per_user",
+										"stat_type": "counter",
+										"sample_rate": 1,
+										"service_identifier": "service_name_or_host",
+										"consumer_identifier": "custom_id"
+									},
+									{
+										"workspace_identifier": null,
+										"name": "request_size",
+										"stat_type": "timer",
+										"sample_rate": null,
+										"service_identifier": "service_name_or_host",
+										"consumer_identifier": null
+									}
+								]
+							}
+						}
+					]
+				}
+			}`,
+		},
+		{
+			name: "ensure non-default metric doesn't get changed",
+			uncompressedPayload: `{
+				"config_table": {
+					"plugins": [
+						{
+							"name": "statsd",
+							"config": {
+								"metrics": [
+									{
+										"name": "cache_datastore_misses_total",
+										"sample_rate": 1,
+										"stat_type": "counter"
+									}
+								]
+							}
+						}
+					]
+				}
+			}`,
+			expectedPayload: `{
+				"config_table": {
+					"plugins": [
+						{
+							"name": "statsd",
+							"config": {
+								"metrics": [
+									{
+										"name": "cache_datastore_misses_total",
+										"sample_rate": 1,
+										"stat_type": "counter"
+									}
+								]
+							}
+						}
+					]
+				}
+			}`,
+		},
+		{
+			name: "ensure non-default identifier doesn't get changed",
+			uncompressedPayload: `{
+				"config_table": {
+					"plugins": [
+						{
+							"name": "statsd",
+							"config": {
+								"metrics": [
+									{
+										"name": "response_size",
+										"stat_type": "timer",
+										"service_identifier": "service_name"
+									}
+								]
+							}
+						}
+					]
+				}
+			}`,
+			expectedPayload: `{
+				"config_table": {
+					"plugins": [
+						{
+							"name": "statsd",
+							"config": {
+								"metrics": [
+									{
+										"name": "response_size",
+										"stat_type": "timer",
+										"service_identifier": "service_name"
+									}
+								]
+							}
+						}
+					]
+				}
+			}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.JSONEq(
+				t,
+				test.expectedPayload,
+				correctStatsdIdentifiers(test.uncompressedPayload, "2.6.0.0", nil, log.Logger),
+			)
+		})
+	}
+}

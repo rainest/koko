@@ -2,16 +2,43 @@ package compat
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/kong/koko/internal/json"
 	"github.com/kong/koko/internal/resource"
 	"github.com/kong/koko/internal/server/kong/ws/config"
 	"github.com/kong/koko/internal/versioning"
+	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
 
 var versionOlderThan300 = versioning.MustNewRange("< 3.0.0")
+
+var (
+	statsdDefaultIdentifiers = map[string]string{
+		"consumer_identifier":  "custom_id",
+		"service_identifier":   "service_name_or_host",
+		"workspace_identifier": "workspace_id",
+	}
+
+	defaultMetrics = map[string][]string{
+		"kong_latency":                    {"service_identifier"},
+		"latency":                         {"service_identifier"},
+		"request_count":                   {"service_identifier"},
+		"request_per_user":                {"consumer_identifier", "service_identifier"},
+		"request_size":                    {"service_identifier"},
+		"response_size":                   {"service_identifier"},
+		"shdict_usage":                    {"service_identifier"},
+		"status_count":                    {"service_identifier"},
+		"status_count_per_user":           {"consumer_identifier", "service_identifier"},
+		"status_count_per_user_per_route": {"consumer_identifier", "service_identifier"},
+		"status_count_per_workspace":      {"workspace_identifier"},
+		"unique_users":                    {"consumer_identifier", "service_identifier"},
+		"upstream_latency":                {"service_identifier"},
+	}
+)
 
 const (
 	awsLambdaExclusiveFieldChangeID = "P121"
@@ -141,6 +168,76 @@ func correctHTTPLogHeadersField(payload string) (string, error) {
 	return payload, nil
 }
 
+// correctStatsdIdentifiers addresses the needed statsd 3.0 schema changes for older DPs.
+//
+// The changes done in 3.0 remove some 'hard-coded' default values for metric identifiers and
+// introduces specific schema fields to define those defaults. This function ensures the new
+// schema works for older DPs by setting the missing default values for the metric identifiers.
+func correctStatsdIdentifiers(
+	payload string,
+	dataPlaneVersionStr string,
+	_ *config.ChangeTracker,
+	logger *zap.Logger,
+) string {
+	log := logger.With(zap.String("plugin", "statsd")).
+		With(zap.String("data-plane", dataPlaneVersionStr))
+
+	processedPayload := payload
+	indexUpdate := 0
+	for _, res := range gjson.Get(processedPayload, "config_table.plugins.#(name=statsd)#").Array() {
+		var (
+			err         error
+			metricsJSON []interface{}
+			metrics     []string
+			updatedRaw  = res.Raw
+		)
+		for _, metric := range gjson.Get(updatedRaw, "config.metrics").Array() {
+			metricRaw := metric.Raw
+			name := metric.Get("name").String()
+			// Only evaluate default metrics.
+			identifiers, ok := defaultMetrics[name]
+			if !ok {
+				metrics = append(metrics, metricRaw)
+				continue
+			}
+			for key, defaultValue := range statsdDefaultIdentifiers {
+				identifier := metric.Get(key)
+				if lo.Contains(identifiers, key) && (!identifier.Exists() || identifier.String() == "") {
+					log := log.With(zap.String("metric", name)).
+						With(zap.String("field", key)).
+						With(zap.String("condition", "missing value")).
+						With(zap.String("new-value", defaultValue))
+					if metricRaw, err = sjson.Set(metricRaw, key, defaultValue); err != nil {
+						log.With(zap.Error(err)).
+							Error("plugin configuration field was not updated in configuration")
+					} else {
+						log.Warn("updating plugin configuration field which is incompatible with data plane")
+					}
+				}
+			}
+			metrics = append(metrics, metricRaw)
+		}
+		metricsBytes := []byte(fmt.Sprintf("[%v]", strings.Join(metrics, ",")))
+		if err = json.Unmarshal(metricsBytes, &metricsJSON); err != nil {
+			log.With(zap.Error(err)).Error("plugin configuration field was not updated in configuration")
+		}
+		if updatedRaw, err = sjson.Set(updatedRaw, "config.metrics", metricsJSON); err != nil {
+			log.With(zap.Any("new-value", metricsJSON)).
+				With(zap.Error(err)).
+				Error("plugin configuration field was not updated in configuration")
+		}
+
+		// Update the processed payload.
+		resIndex := res.Index - indexUpdate
+		updatedPayload := processedPayload[:resIndex] + updatedRaw +
+			processedPayload[resIndex+len(res.Raw):]
+		indexUpdate += len(processedPayload) - len(updatedPayload)
+		processedPayload = updatedPayload
+	}
+
+	return processedPayload
+}
+
 func VersionCompatibilityExtraProcessing(payload string, dataPlaneVersion versioning.Version,
 	tracker *config.ChangeTracker, logger *zap.Logger,
 ) (string, error) {
@@ -158,6 +255,9 @@ func VersionCompatibilityExtraProcessing(payload string, dataPlaneVersion versio
 		if processedPayload, err = correctHTTPLogHeadersField(processedPayload); err != nil {
 			return "", err
 		}
+
+		// Correct default metrics identifier for statsd in 2.x.x.x.
+		processedPayload = correctStatsdIdentifiers(processedPayload, dataPlaneVersionStr, tracker, logger)
 	}
 
 	return processedPayload, nil
