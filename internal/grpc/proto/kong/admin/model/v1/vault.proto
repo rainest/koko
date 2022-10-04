@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package kong.admin.model.v1;
+
+import "google/api/field_behavior.proto";
+
+option go_package = "github.com/kong/koko/internal/gen/grpc/kong/admin/model/v1;v1";
+
+message Vault {
+  string id = 1;
+  int32 created_at = 2;
+  int32 updated_at = 3;
+  string prefix = 4 [(google.api.field_behavior) = REQUIRED];
+  string name = 5 [(google.api.field_behavior) = REQUIRED];
+  string description = 6;
+  message Config {
+    string prefix = 1;
+  }
+  Config config = 7;
+  repeated string tags = 8;
+}
