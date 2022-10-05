@@ -81,6 +81,13 @@ func goodRoute() Route {
 	return r
 }
 
+func expressionRoute(exp string) Route {
+	r := NewRoute()
+	r.Route.Expression = exp
+	_ = r.ProcessDefaults(context.Background())
+	return r
+}
+
 func TestRoute_Validate(t *testing.T) {
 	tests := []struct {
 		name                    string
@@ -1267,8 +1274,7 @@ func TestRoute_Validate(t *testing.T) {
 		{
 			name: "expression route needs priority",
 			Route: func() Route {
-				r := goodRoute()
-				r.Route.Expression = "net.port == 80"
+				r := expressionRoute("net.port == 80")
 				return r
 			},
 			wantErr: true,
@@ -1284,17 +1290,131 @@ func TestRoute_Validate(t *testing.T) {
 		{
 			name: "minimal complete expression route",
 			Route: func() Route {
-				r := goodRoute()
-				r.Route.Expression = "net.port == 80"
+				r := expressionRoute("net.port == 80")
 				r.Route.Priority = 5
 				return r
 			},
 		},
 		{
+			name: "expression route must not have traditional field 'hosts'",
+			Route: func() Route {
+				r := expressionRoute("net.port == 80")
+				r.Route.Priority = 5
+				r.Route.Hosts = []string{"foo.example.com"}
+				return r
+			},
+			wantErr: true,
+			Errs: []*model.ErrorDetail{
+				{
+					Type:  model.ErrorType_ERROR_TYPE_FIELD,
+					Field: "hosts",
+					Messages: []string{
+						"When 'expression' is defined, the field 'hosts' must not be set.",
+					},
+				},
+			},
+		},
+		{
+			name: "expression route must not have traditional field 'paths'",
+			Route: func() Route {
+				r := expressionRoute("net.port == 80")
+				r.Route.Priority = 5
+				r.Route.Paths = []string{"/bar"}
+				return r
+			},
+			wantErr: true,
+			Errs: []*model.ErrorDetail{
+				{
+					Type:  model.ErrorType_ERROR_TYPE_FIELD,
+					Field: "paths",
+					Messages: []string{
+						"When 'expression' is defined, the field 'paths' must not be set.",
+					},
+				},
+			},
+		},
+		{
+			name: "expression route must not have traditional field 'headers'",
+			Route: func() Route {
+				r := expressionRoute("net.port == 80")
+				r.Route.Priority = 5
+				r.Route.Headers = map[string]*model.HeaderValues{
+					"Location": {Values: []string{"/go/there"}},
+				}
+				return r
+			},
+			wantErr: true,
+			Errs: []*model.ErrorDetail{
+				{
+					Type:  model.ErrorType_ERROR_TYPE_FIELD,
+					Field: "headers",
+					Messages: []string{
+						"When 'expression' is defined, the field 'headers' must not be set.",
+					},
+				},
+			},
+		},
+		{
+			name: "expression route must not have traditional field 'methods'",
+			Route: func() Route {
+				r := expressionRoute("net.port == 80")
+				r.Route.Priority = 5
+				r.Route.Methods = []string{"GET", "POST"}
+				return r
+			},
+			wantErr: true,
+			Errs: []*model.ErrorDetail{
+				{
+					Type:  model.ErrorType_ERROR_TYPE_FIELD,
+					Field: "methods",
+					Messages: []string{
+						"When 'expression' is defined, the field 'methods' must not be set.",
+					},
+				},
+			},
+		},
+		{
+			name: "expression route must not have traditional field 'path_handling'",
+			Route: func() Route {
+				r := expressionRoute("net.port == 80")
+				r.Route.Priority = 5
+				r.Route.PathHandling = "v1"
+				return r
+			},
+			wantErr: true,
+			Errs: []*model.ErrorDetail{
+				{
+					Type:  model.ErrorType_ERROR_TYPE_FIELD,
+					Field: "path_handling",
+					Messages: []string{
+						"When 'expression' is defined, the field 'path_handling' must not be set.",
+					},
+				},
+			},
+		},
+		{
+			name: "expression route must not have traditional field 'regex_priority'",
+			Route: func() Route {
+				r := expressionRoute("net.port == 80")
+				r.Route.Priority = 5
+				r.Route.RegexPriority = wrapperspb.Int32(4)
+				return r
+			},
+			wantErr: true,
+			Errs: []*model.ErrorDetail{
+				{
+					Type:  model.ErrorType_ERROR_TYPE_FIELD,
+					Field: "regex_priority",
+					Messages: []string{
+						"When 'expression' is defined, the field 'regex_priority' must not be set.",
+					},
+				},
+			},
+		},
+		{
 			name: "expression route must not have traditional field 'snis'",
 			Route: func() Route {
-				r := goodRoute()
-				r.Route.Expression = "net.port == 80"
+				r := expressionRoute("net.port == 80")
 				r.Route.Priority = 5
 				r.Route.Snis = []string{"foo.example.com"}
 				return r
@@ -1302,10 +1422,10 @@ func TestRoute_Validate(t *testing.T) {
 			wantErr: true,
 			Errs: []*model.ErrorDetail{
 				{
-					Type: model.ErrorType_ERROR_TYPE_ENTITY,
+					Type:  model.ErrorType_ERROR_TYPE_FIELD,
+					Field: "snis",
 					Messages: []string{
-						"When 'expression' is defined, " +
-							"'snis', 'sources' or 'destinations' cannot be set.",
+						"When 'expression' is defined, the field 'snis' must not be set.",
 					},
 				},
 			},
@@ -1313,10 +1433,8 @@ func TestRoute_Validate(t *testing.T) {
 		{
 			name: "expression route must not have traditional field 'sources'",
 			Route: func() Route {
-				r := goodRoute()
-				r.Route.Hosts = []string{}
+				r := expressionRoute("net.port == 80")
 				r.Route.Protocols = []string{typedefs.ProtocolTCP}
-				r.Route.Expression = "net.port == 80"
 				r.Route.Priority = 5
 				r.Route.Sources = []*model.CIDRPort{{Ip: "10.0.0.0/8"}}
 				return r
@@ -1324,10 +1442,10 @@ func TestRoute_Validate(t *testing.T) {
 			wantErr: true,
 			Errs: []*model.ErrorDetail{
 				{
-					Type: model.ErrorType_ERROR_TYPE_ENTITY,
+					Type:  model.ErrorType_ERROR_TYPE_FIELD,
+					Field: "sources",
 					Messages: []string{
-						"When 'expression' is defined, " +
-							"'snis', 'sources' or 'destinations' cannot be set.",
+						"When 'expression' is defined, the field 'sources' must not be set.",
 					},
 				},
 			},
@@ -1335,10 +1453,8 @@ func TestRoute_Validate(t *testing.T) {
 		{
 			name: "expression route must not have traditional field 'destinations'",
 			Route: func() Route {
-				r := goodRoute()
-				r.Route.Hosts = []string{}
+				r := expressionRoute("net.port == 80")
 				r.Route.Protocols = []string{typedefs.ProtocolTCP}
-				r.Route.Expression = "net.port == 80"
 				r.Route.Priority = 5
 				r.Route.Destinations = []*model.CIDRPort{{Ip: "10.0.0.0/8"}}
 				return r
@@ -1346,10 +1462,10 @@ func TestRoute_Validate(t *testing.T) {
 			wantErr: true,
 			Errs: []*model.ErrorDetail{
 				{
-					Type: model.ErrorType_ERROR_TYPE_ENTITY,
+					Type:  model.ErrorType_ERROR_TYPE_FIELD,
+					Field: "destinations",
 					Messages: []string{
-						"When 'expression' is defined, " +
-							"'snis', 'sources' or 'destinations' cannot be set.",
+						"When 'expression' is defined, the field 'destinations' must not be set.",
 					},
 				},
 			},
@@ -1357,8 +1473,7 @@ func TestRoute_Validate(t *testing.T) {
 		{
 			name: "expression route must be a valid expression",
 			Route: func() Route {
-				r := goodRoute()
-				r.Route.Expression = "tcp.aport .. K9"
+				r := expressionRoute("tcp.aport .. K9")
 				r.Route.Priority = 5
 				return r
 			},
